@@ -180,17 +180,17 @@ HardwareSerial *serial = &Serial1;
 #define USE_LEONARDO
 #include <MIDIUSB.h>
 
-#define GB_SET(bit_cl, bit_out, bit_in) PORTF = (PINF & B00011111) | ((bit_cl<<7) | ((bit_out)<<6) | ((bit_in)<<5))
+#define GB_SET(bit_cl, bit_out, bit_in) PORTF = (PINF & B00011111) | ((bit_cl<<6) | ((bit_out)<<7) | ((bit_in)<<5))
 // ^ The reason for not using digitalWrite is to allign clock and data pins for the GB shift reg.
 // Pin distribution comes from official Arduino Leonardo documentation
 
-int pinGBClock     = A0;    // Analog In 0 - clock out to gameboy
-int pinGBSerialOut = A1;    // Analog In 1 - serial data to gameboy
+int pinGBClock     = A1;    // Analog In 1 - clock out to gameboy
+int pinGBSerialOut = A0;    // Analog In 0 - serial data to gameboy
 int pinGBSerialIn  = A2;    // Analog In 2 - serial data from gameboy
 int pinMidiInputPower = 4; // power pin for midi input opto-isolator
-int pinStatusLed = 13; // Status LED
-int pinLeds[] = {12,11,10,9,8,13}; // LED Pins
-int pinButtonMode = 3; //toggle button for selecting the mode
+int pinStatusLed = 10; // Status LED
+int pinLeds[] = {8,9,15,14,16,10}; // LED Pins
+int pinButtonMode = 7; //toggle button for selecting the mode
 
 HardwareSerial *serial = &Serial1;
 
@@ -431,7 +431,7 @@ void setup() {
 */
   for(int led=0;led<=5;led++) pinMode(pinLeds[led],OUTPUT);
   pinMode(pinStatusLed,OUTPUT);
-  pinMode(pinButtonMode,INPUT);
+  pinMode(pinButtonMode,INPUT_PULLUP);
 
   pinMode(pinGBClock,OUTPUT);
   pinMode(pinGBSerialIn,INPUT);
