@@ -11,6 +11,21 @@
  *                                                                         *
  ***************************************************************************/
 
+#define PB_UPDATE_INTERVAL   10 // ms
+#define PB_PERIOD_MAX       500 // ms
+
+// range: 0..16383
+// middle (no bend): 8192
+
+uint16_t pbCurrent = 8192;
+int16_t pbAmplitude = 16383;
+int16_t pbPeriod = 200;
+float pbMod = 0;
+int16_t pbModInt;
+int16_t pbSend;
+int32_t millisNow;
+int32_t millisUpdate;
+
 void modeMidiGbSetup()
 {
   digitalWrite(pinStatusLed,LOW);
@@ -29,7 +44,24 @@ void modeMidiGb()
 {
   boolean sendByte = false;
   while(1){                                //Loop foreverrrr
+    millisNow = millis();
     modeMidiGbUsbMidiReceive();
+
+    // Handle pitch modulation
+    if(pbAmplitude > 0 && (millisNow - millisUpdate) > PB_UPDATE_INTERVAL)
+    {  
+      pbMod = (float)(pbAmplitude/pbPeriod) * (pbPeriod - abs(millisNow % (2*pbPeriod) - pbPeriod)) - (pbAmplitude/2);
+      //pbMod = (float)(pbAmplitude/pbPeriod) * (pbPeriod - abs(millisNow % (2*pbPeriod) - pbPeriod));
+      pbModInt = (int)pbMod;
+      pbSend = constrain(pbCurrent+pbModInt,0,16383);
+      sendByteToGameboy(0xE0+0); // 0 = channel
+      delayMicroseconds(GB_MIDI_DELAY);
+      sendByteToGameboy(pbSend & 0x7F);
+      delayMicroseconds(GB_MIDI_DELAY);
+      sendByteToGameboy(pbSend >> 7);
+      delayMicroseconds(GB_MIDI_DELAY);
+      millisUpdate = millisNow;
+    }
 
     if (serial->available()) {          //If MIDI is sending
       incomingMidiByte = serial->read();    //Get the byte sent from MIDI
@@ -233,13 +265,26 @@ void modeMidiGbUsbMidiReceive()
           blinkLight(s, rx.byte2);
           break;
         case 0x0B: // CC
-          sendByteToGameboy(0xB0 + ch);
-          delayMicroseconds(GB_MIDI_DELAY);
-          sendByteToGameboy(rx.byte2);
-          delayMicroseconds(GB_MIDI_DELAY);
-          sendByteToGameboy(rx.byte3);
-          delayMicroseconds(GB_MIDI_DELAY);
-          blinkLight(0xB0 + ch, rx.byte2);
+          if( (rx.byte2 > 0 && rx.byte2 < 6) || rx.byte2 == 10 || rx.byte2 == 64)
+          { 
+            sendByteToGameboy(0xB0 + ch);
+            delayMicroseconds(GB_MIDI_DELAY);
+            sendByteToGameboy(rx.byte2);
+            delayMicroseconds(GB_MIDI_DELAY);
+            sendByteToGameboy(rx.byte3);
+            delayMicroseconds(GB_MIDI_DELAY);
+            blinkLight(0xB0 + ch, rx.byte2);
+          }
+          else {
+            if(rx.byte2 == 12)      // Set vibrato amount
+            {
+              pbAmplitude = map(rx.byte3, 0, 127, 0, 16383);
+            }
+            else if(rx.byte2 == 13) // Set vibrato speed
+            {
+              pbPeriod = map(rx.byte3, 0, 127, 50, PB_PERIOD_MAX);
+            }
+          }
           break;
         case 0x0C: // PG
           sendByteToGameboy(0xC0 + ch);
@@ -249,11 +294,13 @@ void modeMidiGbUsbMidiReceive()
           blinkLight(0xC0 + ch, rx.byte2);
           break;
         case 0x0E: // PB
+          pbCurrent = rx.byte2 | (rx.byte3 << 7);
+          pbSend = constrain(pbCurrent+pbModInt,0,16383);
           sendByteToGameboy(0xE0 + ch);
           delayMicroseconds(GB_MIDI_DELAY);
-          sendByteToGameboy(rx.byte2);
+          sendByteToGameboy(pbSend & 0x7F);
           delayMicroseconds(GB_MIDI_DELAY);
-          sendByteToGameboy(rx.byte3);
+          sendByteToGameboy(pbSend >> 7);
           delayMicroseconds(GB_MIDI_DELAY);
           break;
         default:
