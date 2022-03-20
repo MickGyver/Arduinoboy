@@ -27,6 +27,8 @@ int16_t vibrInt[3] = {0,0,0};        // Calculated vibrato converted to an integ
 int32_t millisNow;                   // Keep track of time
 int32_t millisUpdate[3];             // Keep track of timestamp for last vibrato update
 
+uint8_t midiVibratoMode = true;
+
 void modeMidiGbSetup()
 {
   digitalWrite(pinStatusLed,LOW);
@@ -111,13 +113,17 @@ void modeMidiGb()
             }
            break;
         }
-      } else if (midiAddressMode){
+      } 
+      else if (midiAddressMode)
+      {
         midiAddressMode = false;
         midiValueMode = true;
         midiData[1] = incomingMidiByte;
         sendByteToGameboy(midiData[1]);
         delayMicroseconds(MGB_MIDI_DELAY);
-      } else if (midiValueMode) {
+      } 
+      else if (midiValueMode) 
+      {
         midiData[2] = incomingMidiByte;
         midiAddressMode = true;
         midiValueMode = false;
@@ -126,6 +132,10 @@ void modeMidiGb()
         delayMicroseconds(MGB_MIDI_DELAY);
         statusLedOn();
         blinkLight(midiData[0],midiData[2]);
+      }
+      else if(midiVibratoMode)
+      {
+
       }
     } else {
       setMode();                // Check if mode button was depressed
