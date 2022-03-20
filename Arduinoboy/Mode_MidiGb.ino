@@ -72,9 +72,11 @@ void modeMidiGb()
 
       if(!checkForProgrammerSysex(incomingMidiByte) && !usbMode) serial->write(incomingMidiByte); //Echo the Byte to MIDI Output
 
-      if(incomingMidiByte & 0x80) {
+      if(incomingMidiByte & 0x80) { // MIDI status byte (message type)
         switch (incomingMidiByte & 0xF0) {
-          case 0xF0:
+          case 0xA0: // Polyphonic Aftertouch
+          case 0xD0: // Channel Aftertouch
+          case 0xF0: // SysEx
             midiValueMode = false;
             break;
           default:
