@@ -27,7 +27,8 @@ int16_t vibrInt[3] = {0,0,0};        // Calculated vibrato converted to an integ
 int32_t millisNow;                   // Keep track of time
 int32_t millisUpdate[3];             // Keep track of timestamp for last vibrato update
 
-uint8_t midiVibratoMode = true;
+uint8_t midiVibratoDepthMode = false;
+uint8_t midiVibratoRateMode = false;
 
 void modeMidiGbSetup()
 {
@@ -51,21 +52,24 @@ void modeMidiGb()
     millisNow = millis();
     modeMidiGbUsbMidiReceive();
 
-    // Handle pitch modulation
-    for(ch=0; ch<3; ch++)
+    // Handle pitch modulation (not in the middle of a MIDI command)
+    if(!midiValueMode)
     {
-      if(vibrDepth[ch] > 0 && (millisNow - millisUpdate[ch]) > VIBR_UPDATE_INTERVAL)
-      {  
-        vibr[ch] = (float)(vibrDepth[ch]/vibrRate[ch]) * (vibrRate[ch] - abs(millisNow % (2*vibrRate[ch]) - vibrRate[ch])) - (vibrDepth[ch]/2);
-        vibrInt[ch] = (int)vibr[ch];
-        pbSend[ch] = constrain(pbCurrent[ch]+vibrInt[ch],0,16383);
-        sendByteToGameboy(0xE0+ch);
-        delayMicroseconds(MGB_MIDI_DELAY);
-        sendByteToGameboy(pbSend[ch] & 0x7F);
-        delayMicroseconds(MGB_MIDI_DELAY);
-        sendByteToGameboy(pbSend[ch] >> 7);
-        delayMicroseconds(MGB_MIDI_DELAY);
-        millisUpdate[ch] = millisNow;
+      for(ch=0; ch<3; ch++)
+      {
+        if(vibrDepth[ch] > 0 && (millisNow - millisUpdate[ch]) > VIBR_UPDATE_INTERVAL)
+        {  
+          vibr[ch] = (float)(vibrDepth[ch]/vibrRate[ch]) * (vibrRate[ch] - abs(millisNow % (2*vibrRate[ch]) - vibrRate[ch])) - (vibrDepth[ch]/2);
+          vibrInt[ch] = (int)vibr[ch];
+          pbSend[ch] = constrain(pbCurrent[ch]+vibrInt[ch],0,16383);
+          sendByteToGameboy(0xE0+ch); // TODO: Don't send value if in the middle of another MIDI message!!!!
+          delayMicroseconds(MGB_MIDI_DELAY);
+          sendByteToGameboy(pbSend[ch] & 0x7F);
+          delayMicroseconds(MGB_MIDI_DELAY);
+          sendByteToGameboy(pbSend[ch] >> 7);
+          delayMicroseconds(MGB_MIDI_DELAY);
+          millisUpdate[ch] = millisNow;
+        }
       }
     }
 
@@ -106,8 +110,6 @@ void modeMidiGb()
             }
             if(sendByte) {
               statusLedOn();
-              sendByteToGameboy(midiData[0]);
-              delayMicroseconds(MGB_MIDI_DELAY);
               midiValueMode  =false;
               midiAddressMode=true;
             }
@@ -117,25 +119,90 @@ void modeMidiGb()
       else if (midiAddressMode)
       {
         midiAddressMode = false;
-        midiValueMode = true;
         midiData[1] = incomingMidiByte;
-        sendByteToGameboy(midiData[1]);
-        delayMicroseconds(MGB_MIDI_DELAY);
+        switch(midiStatusType)
+        {
+          case 0xE0: // Pitch Bend
+            sendByteToGameboy(midiData[0]);
+            delayMicroseconds(MGB_MIDI_DELAY);
+            midiValueMode = true;
+            break;
+
+          case 0xB0: // Control Change
+            if( (incomingMidiByte > 0 && incomingMidiByte < 6) || incomingMidiByte == 10 || incomingMidiByte == 64) // Just send CCs that mGB uses
+            { 
+              midiValueMode = true;
+              sendByteToGameboy(midiData[0]);
+              delayMicroseconds(MGB_MIDI_DELAY);
+              sendByteToGameboy(midiData[1]);
+              delayMicroseconds(MGB_MIDI_DELAY);
+            }
+            else if(incomingMidiByte == CC_VIBRATO_DEPTH)     // Set vibrato depth
+            {
+              midiVibratoDepthMode = true;
+            }
+            else if(incomingMidiByte == CC_VIBRATO_RATE)  // Set vibrato rate
+            {
+              midiVibratoRateMode = true;
+            }
+            break;
+
+          default:
+            midiValueMode = true;
+            sendByteToGameboy(midiData[0]);
+            delayMicroseconds(MGB_MIDI_DELAY);
+            sendByteToGameboy(midiData[1]);
+            delayMicroseconds(MGB_MIDI_DELAY);
+            break;
+        }
       } 
       else if (midiValueMode) 
       {
         midiData[2] = incomingMidiByte;
         midiAddressMode = true;
         midiValueMode = false;
+        switch(midiStatusType)
+        {
+          case 0xE0: // Pitch Bend
+            pbCurrent[midiStatusChannel] = midiData[1] | (midiData[2] << 7);
+            pbSend[midiStatusChannel] = constrain(pbCurrent[midiStatusChannel]+vibrInt[midiStatusChannel],0,16383);
+            sendByteToGameboy(pbSend[midiStatusChannel] & 0x7F);
+            delayMicroseconds(MGB_MIDI_DELAY);
+            sendByteToGameboy(pbSend[midiStatusChannel] >> 7);
+            delayMicroseconds(MGB_MIDI_DELAY);
+            break;
 
-        sendByteToGameboy(midiData[2]);
-        delayMicroseconds(MGB_MIDI_DELAY);
+          default:
+            sendByteToGameboy(midiData[2]);
+            delayMicroseconds(MGB_MIDI_DELAY);
+            break;
+        }
         statusLedOn();
         blinkLight(midiData[0],midiData[2]);
       }
-      else if(midiVibratoMode)
+      else if(midiVibratoDepthMode)
       {
-
+        midiData[2] = incomingMidiByte;
+        midiAddressMode = true;
+        midiVibratoDepthMode = false;
+        vibrDepth[midiStatusChannel] = map(midiData[2], 0, 127, 0, 16383);
+        if(vibrDepth[midiStatusChannel] == 0) // Reset pitch bend to current if vibrato depth becomes 0
+        {
+          vibrInt[midiStatusChannel] = 0; // Reset vibrato value
+          sendByteToGameboy(0xE0 + midiStatusChannel);
+          delayMicroseconds(MGB_MIDI_DELAY);
+          sendByteToGameboy(pbCurrent[midiStatusChannel] & 0x7F);
+          delayMicroseconds(MGB_MIDI_DELAY);
+          sendByteToGameboy(pbCurrent[midiStatusChannel] >> 7);
+          delayMicroseconds(MGB_MIDI_DELAY);
+        }
+      }
+      else if(midiVibratoRateMode)
+      {
+        midiData[2] = incomingMidiByte;
+        vibrRate[midiStatusChannel] = map(midiData[2], 0, 127, 50, VIBR_RATE_MAX);
+        midiAddressMode = true;
+        midiVibratoRateMode = false;   
       }
     } else {
       setMode();                // Check if mode button was depressed
